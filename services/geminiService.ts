@@ -1,8 +1,9 @@
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { PracticeItem, PracticeLevel, ScoreResult } from '../types';
 
-// FIX: Initialize the Google Gemini AI client using the API key from environment variables.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+// FIX: Initialize the Google Gemini AI client using the API key from Vite's environment variables.
+// This is required for the key to be accessible in a production build.
+const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY as string });
 
 /**
  * Generates text-to-speech audio for the given text.
@@ -11,7 +12,6 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
  */
 export const getTextToSpeechAudio = async (text: string): Promise<string> => {
   try {
-    // FIX: Use the 'gemini-2.5-flash-preview-tts' model for text-to-speech generation as per API guidelines.
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
       contents: [{ parts: [{ text }] }],
@@ -50,10 +50,8 @@ export const getPronunciationScore = async (
   item: PracticeItem,
   level: PracticeLevel
 ): Promise<ScoreResult> => {
-  // FIX: Use a powerful model like 'gemini-2.5-pro' for nuanced analysis and reliable structured JSON output.
   const model = 'gemini-2.5-pro';
 
-  // For phonemes, providing the example word gives the AI better context for evaluation.
   const referenceText = level === PracticeLevel.Phonemes ? item.exampleWord : item.text;
 
   const prompt = `
@@ -74,7 +72,6 @@ export const getPronunciationScore = async (
   `;
 
   try {
-    // FIX: Send a multimodal request with a text prompt and the user's audio data.
     const response = await ai.models.generateContent({
       model: model,
       contents: [
@@ -90,7 +87,6 @@ export const getPronunciationScore = async (
           ],
         },
       ],
-      // FIX: Use responseMimeType and responseSchema to ensure the AI returns a valid JSON object.
       config: {
         responseMimeType: 'application/json',
         responseSchema: {
@@ -110,7 +106,6 @@ export const getPronunciationScore = async (
       },
     });
 
-    // FIX: Get the response text directly as per guidelines.
     const responseText = response.text.trim();
     if (!responseText) {
         throw new Error("Received an empty response from the AI. The audio might be silent or too quiet.");
