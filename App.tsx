@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { PronunciationCoach } from './components/PronunciationCoach';
 import { LoginPage } from './components/LoginPage';
 import { VerificationPage } from './components/VerificationPage';
+import { AdminPage } from './components/AdminPage';
 import * as authService from './services/authService';
 import { LoadingIcon } from './components/Icons';
 
@@ -15,9 +16,23 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isActivated, setIsActivated] = useState(false);
   const [view, setView] = useState<View>('loading');
+  const [hash, setHash] = useState(window.location.hash);
 
+  // Listen for hash changes to toggle admin view
   useEffect(() => {
-    // Check for an existing session when the app loads
+    const handleHashChange = () => {
+      setHash(window.location.hash);
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+  
+  // Handle user authentication state, but only if not on the admin page
+  useEffect(() => {
+    if (hash === '#/admin') {
+      return; // Don't run auth logic for admin page
+    }
+
     const currentUser = authService.getCurrentUser();
     if (currentUser) {
       setUser(currentUser);
@@ -34,7 +49,7 @@ function App() {
       setIsActivated(false);
       setView('app');
     }
-  }, []);
+  }, [hash]); // Re-run this logic if the hash changes away from #/admin
 
   const handleLoginRequest = () => setView('login');
 
@@ -61,6 +76,11 @@ function App() {
     // Guest practice count is handled within the coach component.
     setView('app');
   };
+
+  // Render Admin page if hash matches
+  if (hash === '#/admin') {
+    return <AdminPage />;
+  }
 
   const renderView = () => {
     switch (view) {

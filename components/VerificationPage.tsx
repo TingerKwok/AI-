@@ -16,6 +16,10 @@ export const VerificationPage: React.FC<VerificationPageProps> = ({ userIdentifi
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!/^\d{3,4}$/.test(code)) {
+        setError('请输入有效的3位或4位激活码。');
+        return;
+    }
     setError(null);
     setIsLoading(true);
     try {
@@ -31,6 +35,15 @@ export const VerificationPage: React.FC<VerificationPageProps> = ({ userIdentifi
       setIsLoading(false);
     }
   };
+
+  const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    // Only allow numbers and limit length
+    if (/^\d*$/.test(value) && value.length <= 4) {
+      setCode(value);
+    }
+  }
+
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex flex-col justify-center items-center p-4">
@@ -57,14 +70,16 @@ export const VerificationPage: React.FC<VerificationPageProps> = ({ userIdentifi
         
         <div className="bg-orange-50 dark:bg-gray-700/50 p-6 rounded-lg">
             <h2 className="text-xl font-semibold text-orange-800 dark:text-orange-300 mb-3 text-center">第二步：输入激活码</h2>
-            <p className="mb-4 text-center text-gray-700 dark:text-gray-300">支付成功后，联系客服获取激活码，并在此处输入。</p>
+            <p className="mb-4 text-center text-gray-700 dark:text-gray-300">支付成功后，店主将为您提供一个一次性的激活码（3位为月卡，4位为年卡），请在此处输入。</p>
             <form onSubmit={handleVerify}>
               <input
-                type="text"
+                type="tel"
                 value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="请输入客服提供的激活码"
-                className="w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white mb-4"
+                onChange={handleCodeChange}
+                placeholder="请输入激活码"
+                maxLength={4}
+                required
+                className="w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white mb-4 text-center tracking-widest text-lg"
               />
               <button
                 type="submit"
