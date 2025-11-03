@@ -1,9 +1,8 @@
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { PracticeItem, PracticeLevel, ScoreResult } from '../types';
 
-// FIX: Initialize the Google Gemini AI client using the API key from Vite's environment variables.
-// This is required for the key to be accessible in a production build.
-const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY as string });
+// FIX: Initialized the Google Gemini AI client using `process.env.API_KEY` to align with the coding guidelines and resolve a TypeScript error.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
 /**
  * Generates text-to-speech audio for the given text.
