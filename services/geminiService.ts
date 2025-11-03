@@ -8,6 +8,7 @@ export const getPronunciationScore = async (
   practiceLevel: PracticeLevel,
 ): Promise<ScoreResult> => {
   try {
+    // FIX: Use `process.env.API_KEY` directly as per coding guidelines, which resolves the TypeScript error with `import.meta.env`.
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
     let promptText = '';
@@ -73,6 +74,7 @@ Please return the result in the specified JSON format.`;
 
 export const getTextToSpeechAudio = async (text: string): Promise<string> => {
   try {
+    // FIX: Use `process.env.API_KEY` directly as per coding guidelines.
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     // If the text is a detailed phoneme prompt, use it as is.
