@@ -12,8 +12,7 @@ export const VerificationPage: React.FC<VerificationPageProps> = ({ userIdentifi
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // TODO: Replace with your actual Weidian store link
-  const weidianStoreLink = "https://weidian.com/";
+  const weidianStoreLink = "https://weidian.com/item.html?itemID=7458196172&wfr=c";
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +39,7 @@ export const VerificationPage: React.FC<VerificationPageProps> = ({ userIdentifi
           激活您的账户
         </h1>
         <p className="text-gray-600 dark:text-gray-300 text-center mb-6">
-          您的账户尚未激活。请先完成支付以解锁全部功能。
+          您的账户尚未激活。完成订阅激活账户解锁练习挑战！
         </p>
         
         <div className="bg-orange-50 dark:bg-gray-700/50 p-6 rounded-lg mb-6 text-center">
