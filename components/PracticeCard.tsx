@@ -1,8 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { PracticeItem, PracticeLevel } from '../types';
-// FIX: Import 'PlayIcon' to resolve reference error.
 import { MicIcon, StopIcon, LoadingIcon, SpeakerIcon, PlayIcon } from './Icons';
-import { getTextToSpeechAudio } from '../services/geminiService';
+import { getTextToSpeechAudio } from '../services/baiduAiService';
 
 interface PracticeCardProps {
   item: PracticeItem;
@@ -15,8 +14,6 @@ interface PracticeCardProps {
   level: PracticeLevel;
 }
 
-// --- Helper functions for Web Audio API playback ---
-
 // Decodes a Base64 string to a Uint8Array.
 function decode(base64: string): Uint8Array {
   const binaryString = atob(base64);
@@ -26,25 +23,6 @@ function decode(base64: string): Uint8Array {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
-}
-
-// Decodes raw PCM audio data into an AudioBuffer for playback.
-async function decodePcmAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-): Promise<AudioBuffer> {
-  const sampleRate = 24000; // Gemini TTS sample rate is 24kHz
-  const numChannels = 1;     // Mono audio
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
-  const channelData = buffer.getChannelData(0);
-  for (let i = 0; i < frameCount; i++) {
-    // Convert 16-bit PCM to Float32 range [-1.0, 1.0]
-    channelData[i] = dataInt16[i] / 32768.0;
-  }
-  return buffer;
 }
 
 // Module-level cache to store fetched audio data for the session.
@@ -92,8 +70,9 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
 
     // Reusable function to decode and play audio from a base64 string.
     const playAudioFromBase64 = async (base64: string) => {
-        const rawAudioData = decode(base64);
-        const audioBuffer = await decodePcmAudioData(rawAudioData, audioContext);
+        const rawAudioData = decode(base64); // This is a Uint8Array
+        // The Web Audio API's decodeAudioData can handle MP3 format directly.
+        const audioBuffer = await audioContext.decodeAudioData(rawAudioData.buffer);
 
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { PRACTICE_DATA } from '../constants';
 import { PracticeLevel, PracticeItem, ScoreResult, PhonemeSuperCategory } from '../types';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import { getPronunciationScore } from '../services/geminiService';
+import { getPronunciationScore } from '../services/baiduAiService';
 import { PracticeCard } from './PracticeCard';
 import { ScoreDisplay } from './ScoreDisplay';
 import { LevelPath, PhonemePath } from './LevelPath';
