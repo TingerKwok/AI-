@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PracticeItem, PracticeLevel, ScoreResult } from '../types';
 import { SpeakerIcon, MicIcon, StopIcon, LoadingIcon } from './Icons';
 import { ScoreDisplay } from './ScoreDisplay';
-import * as baiduAiService from '../services/baiduAiService';
+// The baiduAiService is no longer needed here as TTS fallback is removed.
 
 interface PracticeCardProps {
   item: PracticeItem;
@@ -84,23 +84,18 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
     const audioPath: string | undefined = item.refAudioUrl;
 
     try {
-        let audioSrc: string;
-
-        // Use local audio file if available (for phonemes), otherwise use TTS
-        if (audioPath) {
-            const response = await fetch(audioPath);
-            if (!response.ok) {
-                // This will throw a much clearer error if the file is not found (e.g., 404)
-                throw new Error(`File not found or server error: ${response.status} ${response.statusText}`);
-            }
-            const audioBlob = await response.blob();
-            audioSrc = URL.createObjectURL(audioBlob);
-            blobUrlRef.current = audioSrc; // Store for cleanup
-        } else {
-            const textToSpeak = item.speakableText || item.text;
-            const base64Audio = await baiduAiService.getTextToSpeechAudio(textToSpeak);
-            audioSrc = `data:audio/mp3;base64,${base64Audio}`;
+        // The logic now only handles local audio files, as the TTS fallback is no longer needed.
+        if (!audioPath) {
+            throw new Error("No reference audio URL provided for this item.");
         }
+
+        const response = await fetch(audioPath);
+        if (!response.ok) {
+            throw new Error(`File not found or server error: ${response.status} ${response.statusText}`);
+        }
+        const audioBlob = await response.blob();
+        const audioSrc = URL.createObjectURL(audioBlob);
+        blobUrlRef.current = audioSrc; // Store for cleanup
         
         if (!refAudioRef.current) {
             refAudioRef.current = new Audio();
