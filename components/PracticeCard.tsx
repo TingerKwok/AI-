@@ -46,6 +46,32 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
   const [isPlayingRef, setIsPlayingRef] = useState(false);
   const [isRefAudioLoading, setIsRefAudioLoading] = useState(false);
   const refAudioRef = useRef<HTMLAudioElement | null>(null);
+  const blobUrlRef = useRef<string | null>(null); // To store blob URL for cleanup
+
+  // Cleanup effect for when the component unmounts
+  useEffect(() => {
+    return () => {
+      if (refAudioRef.current) {
+          refAudioRef.current.pause();
+      }
+      if (blobUrlRef.current) {
+          URL.revokeObjectURL(blobUrlRef.current);
+      }
+    };
+  }, []);
+
+  // Effect to stop audio and clean up when the practice item changes
+  useEffect(() => {
+    if (refAudioRef.current) {
+        refAudioRef.current.pause();
+        refAudioRef.current.src = '';
+    }
+    if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+    }
+    setIsPlayingRef(false);
+  }, [item]);
 
   const handlePlayReferenceAudio = async () => {
     if (isPlayingRef) {
@@ -54,21 +80,50 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
       return;
     }
 
+    // Clean up previous blob URL if it exists from a previous play
+    if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+    }
+
     setIsRefAudioLoading(true);
+    const audioPath: string | undefined = item.refAudioUrl;
+
     try {
-        const textToSpeak = item.speakableText || item.text;
-        const base64Audio = await baiduAiService.getTextToSpeechAudio(textToSpeak);
-        const audioSrc = `data:audio/mp3;base64,${base64Audio}`;
+        let audioSrc: string;
+
+        // Use local audio file if available (for phonemes), otherwise use TTS
+        if (audioPath) {
+            const response = await fetch(audioPath);
+            if (!response.ok) {
+                // This will throw a much clearer error if the file is not found (e.g., 404)
+                throw new Error(`File not found or server error: ${response.status} ${response.statusText}`);
+            }
+            const audioBlob = await response.blob();
+            audioSrc = URL.createObjectURL(audioBlob);
+            blobUrlRef.current = audioSrc; // Store for cleanup
+        } else {
+            const textToSpeak = item.speakableText || item.text;
+            const base64Audio = await baiduAiService.getTextToSpeechAudio(textToSpeak);
+            audioSrc = `data:audio/mp3;base64,${base64Audio}`;
+        }
         
         if (!refAudioRef.current) {
             refAudioRef.current = new Audio();
-            refAudioRef.current.onended = () => setIsPlayingRef(false);
         }
-        refAudioRef.current.src = audioSrc;
-        refAudioRef.current.play();
+        const audio = refAudioRef.current;
+        
+        audio.onended = () => {
+          setIsPlayingRef(false);
+        };
+        
+        audio.src = audioSrc;
+        await audio.play();
         setIsPlayingRef(true);
+
     } catch (err) {
-        console.error("Failed to play reference audio", err);
+        console.error(`Failed to play reference audio. Ensure the file path '${audioPath}' is correct and the file is served properly.`, err);
+        setIsPlayingRef(false);
     } finally {
         setIsRefAudioLoading(false);
     }
