@@ -70,7 +70,7 @@ async function getXunfeiAuthParams(
 // --- WebSocket Handler for Speech Evaluation ---
 async function handleEvaluation(request: Request, env: Record<string, any>): Promise<Response> {
   const { audioBase64, referenceText, audioMimeType } = await request.json() as EvaluationRequestBody;
-  const encoding = audioMimeType === 'audio/mpeg' ? 'lame' : 'raw';
+  const encoding = audioMimeType === 'audio/pcm' ? 'raw' : 'lame';
   
   const host = 'cn-east-1.ws-api.xf-yun.com';
   const path = '/v1/private/s8e098720';
@@ -81,6 +81,19 @@ async function handleEvaluation(request: Request, env: Record<string, any>): Pro
 
   const result = await new Promise((resolve, reject) => {
       const ws = new WebSocket(authUrl);
+      let timeoutId: any;
+
+      const cleanup = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+      };
+
+      timeoutId = setTimeout(() => {
+          cleanup();
+          if (ws.readyState < 2) { // CONNECTING or OPEN
+              ws.close(1001, 'Timeout');
+          }
+          // The rejection is now handled by the 'close' event listener for consistency.
+      }, 15000); // 15-second timeout
 
       ws.addEventListener('open', () => {
           const requestFrame = {
@@ -109,18 +122,28 @@ async function handleEvaluation(request: Request, env: Record<string, any>): Pro
       ws.addEventListener('message', (event) => {
           const response = JSON.parse(event.data as string);
           if (response.header.code === 0 && response.payload?.result?.text) {
+              cleanup();
               const decodedResult = JSON.parse(atob(response.payload.result.text));
               resolve(decodedResult.result);
               ws.close(1000, "Task completed");
           } else if (response.header.code !== 0) {
+              cleanup();
               reject(new Error(`AI 引擎错误: ${response.header.message || '未知错误'}`));
               ws.close(4000, "Error received");
           }
       });
 
-      ws.addEventListener('error', () => reject(new Error('与 AI 评分服务连接失败。')));
+      ws.addEventListener('error', () => {
+          cleanup();
+          reject(new Error('与 AI 评分服务连接失败。'));
+      });
       ws.addEventListener('close', (event) => {
-          if (!event.wasClean) reject(new Error('与 AI 评分服务的连接意外断开。'));
+          cleanup();
+          if (event.code === 1001 && event.reason === 'Timeout') {
+              reject(new Error('AI 引擎响应超时。'));
+          } else if (!event.wasClean) {
+              reject(new Error(`与 AI 评分服务的连接意外断开 (Code: ${event.code})。`));
+          }
       });
   });
 

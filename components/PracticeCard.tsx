@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PracticeItem, PracticeLevel, EvaluationResult } from '../types';
 import { SpeakerIcon, MicIcon, StopIcon, LoadingIcon } from './Icons';
 import { ScoreDisplay } from './ScoreDisplay';
+import { getTtsAudio } from '../services/xunfeiService';
 
 interface PracticeCardProps {
   item: PracticeItem;
@@ -19,6 +20,16 @@ interface PracticeCardProps {
   onStopRecording: () => void;
   onBack: () => void;
 }
+
+const base64ToBlob = (base64: string, mimeType: string): Blob => {
+  const byteCharacters = atob(base64);
+  const byteNumbers = new Array(byteCharacters.length);
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+  const byteArray = new Uint8Array(byteNumbers);
+  return new Blob([byteArray], { type: mimeType });
+};
 
 export const PracticeCard: React.FC<PracticeCardProps> = ({
   item,
@@ -61,10 +72,11 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
       setIsPlayingRef(false);
       return;
     }
-
-    if (!item.refAudioUrl) {
-      alert('此项目没有示范音频。');
-      return;
+    
+    const textToSpeak = item.speakableText || item.exampleWord || item.text;
+    if (!textToSpeak) {
+        alert('此项目没有可用于生成示范音频的文本。');
+        return;
     }
 
     if (isLoadingAudio) return; // Prevent double-clicks
@@ -73,26 +85,16 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
     setIsPlayingRef(false); // Reset state
 
     try {
-      // Construct an absolute URL to prevent SPA routing issues on deployed pages.
-      const absoluteUrl = new URL(item.refAudioUrl, window.location.origin).href;
-      const response = await fetch(absoluteUrl);
-
-      if (!response.ok) {
-        throw new Error(`无法找到音频文件 (HTTP ${response.status})。请检查 public 文件夹中的路径是否正确。`);
-      }
-
-      const blob = await response.blob();
-
-      if (blob.type.startsWith('text/html')) {
-        throw new Error('服务器返回的不是有效的音频文件。这通常是单页应用路由配置问题导致的。');
-      }
+      // Use the TTS service to generate audio dynamically, avoiding static file issues.
+      const audioBase64 = await getTtsAudio(textToSpeak);
+      const audioBlob = base64ToBlob(audioBase64, 'audio/mpeg'); // Xunfei TTS returns MP3 ('lame')
 
       // Clean up previous audio URL if it exists
       if (audioUrlRef.current) {
         URL.revokeObjectURL(audioUrlRef.current);
       }
       
-      const newAudioUrl = URL.createObjectURL(blob);
+      const newAudioUrl = URL.createObjectURL(audioBlob);
       audioUrlRef.current = newAudioUrl;
       
       const audio = new Audio(newAudioUrl);
@@ -100,8 +102,8 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
 
       audio.onended = () => setIsPlayingRef(false);
       audio.onerror = (e) => {
-        console.error(`Audio playback error for blob URL.`, e);
-        alert('播放已加载的音频时出错。');
+        console.error(`Audio playback error for TTS audio.`, e);
+        alert('播放示范音频时出错。');
         setIsPlayingRef(false);
       };
 
@@ -109,8 +111,8 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
       setIsPlayingRef(true);
 
     } catch (err) {
-      const message = err instanceof Error ? err.message : '加载音频时发生未知错误。';
-      console.error("Failed to fetch or play audio:", err);
+      const message = err instanceof Error ? err.message : '加载示范音频时发生未知错误。';
+      console.error("Failed to fetch or play TTS audio:", err);
       alert(message);
       setIsPlayingRef(false);
     } finally {
