@@ -96,7 +96,7 @@ async function handleEvaluation(request: Request, env: Record<string, any>): Pro
     if (!ws) {
       const errorBody = await upgradeResponse.text();
       console.error("WebSocket upgrade failed:", upgradeResponse.status, errorBody);
-      throw new Error(`AI 引擎连接握手失败 (status: ${upgradeResponse.status}).`);
+      throw new Error(`AI 引擎连接握手失败 (status: ${upgradeResponse.status}). 讯飞返回: ${errorBody || '无详细信息'}`);
     }
 
     // This Promise wraps the WebSocket lifecycle.
