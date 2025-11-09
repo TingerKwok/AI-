@@ -37,10 +37,12 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
   onBack,
 }) => {
   const [isPlayingRef, setIsPlayingRef] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
   const refAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // When the practice item changes, stop any currently playing audio.
+  // When the practice item changes, stop any currently playing audio and clear errors.
   useEffect(() => {
+    setPlaybackError(null);
     if (refAudioRef.current) {
       refAudioRef.current.pause();
       setIsPlayingRef(false);
@@ -55,6 +57,7 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
   }, [item]);
 
   const handlePlayReferenceAudio = () => {
+    setPlaybackError(null); // Clear previous errors before playing
     // If audio is currently playing, pause it and reset.
     if (isPlayingRef && refAudioRef.current) {
       refAudioRef.current.pause();
@@ -65,13 +68,17 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
 
     // Ensure there's a local audio file URL to play.
     if (!item.refAudioUrl) {
-      alert('此项目没有提供示范音频文件。');
+      setPlaybackError('此项目没有提供示范音频文件。');
       return;
     }
 
     // Use the existing audio element if it's for the same URL, otherwise create a new one.
     if (refAudioRef.current && refAudioRef.current.src.endsWith(item.refAudioUrl)) {
-      refAudioRef.current.play().catch(e => console.error("Audio playback failed", e));
+      refAudioRef.current.play().catch(e => {
+        console.error("Audio playback failed programmatically.", e);
+        setPlaybackError('音频播放失败。');
+        setIsPlayingRef(false);
+      });
     } else {
       const audio = new Audio(item.refAudioUrl);
       refAudioRef.current = audio;
@@ -83,13 +90,14 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
         audio.currentTime = 0; // Reset for next play
       };
       audio.onerror = (e) => {
-        console.error(`Error playing audio file: ${item.refAudioUrl}`, e);
-        alert('播放示范音频时出错。请检查 public 文件夹中的文件是否存在。');
+        console.error(`Error playing audio file: ${item.refAudioUrl}. The browser could not load the resource. This is often due to the file not being found (404 Not Found). Please ensure the file exists in your project's 'public' directory.`, e);
+        setPlaybackError('无法播放示范音频，请检查文件是否存在。');
         setIsPlayingRef(false);
       };
 
       audio.play().catch(e => {
-        console.error("Audio playback failed", e);
+        console.error("Audio playback failed programmatically. This could be due to browser restrictions.", e);
+        setPlaybackError('音频播放失败。');
         setIsPlayingRef(false);
       });
     }
@@ -163,6 +171,12 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
                 {isRecording ? <StopIcon className="w-12 h-12" /> : <MicIcon className="w-12 h-12" />}
             </button>
         </div>
+
+        {playbackError && (
+            <div className="text-center mt-4 text-sm text-red-600 dark:text-red-400">
+                <p>{playbackError}</p>
+            </div>
+        )}
         
         {isLoading && (
             <div className="text-center my-4 p-4 bg-orange-50 dark:bg-gray-700/50 rounded-lg">
@@ -177,7 +191,7 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
             </div>
         )}
 
-        {score && !isLoading && !error && <ScoreDisplay result={score} />}
+        {score && !isLoading && !error && !playbackError && <ScoreDisplay result={score} />}
       </div>
     </div>
   );
