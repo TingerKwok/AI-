@@ -67,7 +67,10 @@ async function getXunfeiAuthParams(
     const secretKey = env.XUNFEI_API_SECRET;
 
     const hashAlgoName = algorithm === 'sha1' ? 'SHA-1' : 'SHA-256';
-    const authAlgoString = algorithm === 'sha1' ? 'hmac-sha1' : 'hmac-sha256';
+    // FIX: The older WebSocket service requires "hmac-sha256" in the authorization string,
+    // even though the signature itself is calculated using HMAC-SHA1. The newer HTTP
+    // services use "hmac-sha256" for both. This change unifies the algorithm string.
+    const authAlgoString = 'hmac-sha256';
 
     const cryptoKey = await crypto.subtle.importKey(
         'raw', 
