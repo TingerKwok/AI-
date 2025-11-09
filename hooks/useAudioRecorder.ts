@@ -46,6 +46,12 @@ const resampleBuffer = (audioBuffer: AudioBuffer, targetSampleRate: number): Flo
     return result;
 };
 
+// List of supported MIME types, with the preferred one for Xunfei (MP3) first.
+const SUPPORTED_MIME_TYPES = [
+    'audio/mpeg',
+    'audio/webm;codecs=opus',
+    'audio/ogg;codecs=opus',
+];
 
 export const useAudioRecorder = () => {
   const [isRecording, setIsRecording] = useState(false);
@@ -63,10 +69,20 @@ export const useAudioRecorder = () => {
     }
 
     const stream = await navigator.mediaDevices.getUserMedia({ audio: {
-        // Request 16kHz sample rate, though browser may not respect it
         sampleRate: 16000 
     }});
-    const mediaRecorder = new MediaRecorder(stream);
+    
+    // Find the best supported MIME type, preferring MP3.
+    const supportedMimeType = SUPPORTED_MIME_TYPES.find(type => MediaRecorder.isTypeSupported(type));
+    
+    if (!supportedMimeType) {
+        stream.getTracks().forEach(track => track.stop());
+        throw new Error('No supported audio recording format found for this browser.');
+    }
+    
+    console.log(`Using MIME type: ${supportedMimeType}`);
+    const mediaRecorder = new MediaRecorder(stream, { mimeType: supportedMimeType });
+
     mediaRecorderRef.current = mediaRecorder;
     audioChunksRef.current = [];
 
@@ -91,32 +107,37 @@ export const useAudioRecorder = () => {
 
       mediaRecorderRef.current.onstop = async () => {
         try {
-            const originalMimeType = mediaRecorderRef.current?.mimeType || 'audio/webm';
-            const audioBlob = new Blob(audioChunksRef.current, { type: originalMimeType });
+            const finalMimeType = mediaRecorderRef.current?.mimeType || 'audio/mpeg';
+            const audioBlob = new Blob(audioChunksRef.current, { type: finalMimeType });
             
-            // --- RAW PCM Processing ---
-            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-            const arrayBuffer = await audioBlob.arrayBuffer();
-            const decodedBuffer = await audioContext.decodeAudioData(arrayBuffer);
-            
-            // Resample to 16kHz as required by Xunfei API
-            const pcmSamples = resampleBuffer(decodedBuffer, 16000);
+            // PREFERRED PATH: If the browser recorded directly to MP3, send it.
+            if (finalMimeType === 'audio/mpeg') {
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const base64 = await blobToBase64(audioBlob);
+                resolve({ url: audioUrl, base64, mimeType: 'audio/mpeg' });
+            } else {
+                // FALLBACK PATH: If MP3 wasn't supported, convert to raw PCM as a last resort.
+                console.warn(`Recorded in unsupported format (${finalMimeType}). Falling back to PCM conversion.`);
+                const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+                const arrayBuffer = await audioBlob.arrayBuffer();
+                const decodedBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                
+                const pcmSamples = resampleBuffer(decodedBuffer, 16000);
 
-            // Convert Float32 PCM to Int16 PCM
-            const samples = new Int16Array(pcmSamples.length);
-            for (let i = 0; i < pcmSamples.length; i++) {
-                const s = Math.max(-1, Math.min(1, pcmSamples[i]));
-                samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                const samples = new Int16Array(pcmSamples.length);
+                for (let i = 0; i < pcmSamples.length; i++) {
+                    const s = Math.max(-1, Math.min(1, pcmSamples[i]));
+                    samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+
+                const pcmBlob = new Blob([samples.buffer], { type: 'audio/pcm' });
+                const audioUrl = URL.createObjectURL(pcmBlob);
+                const base64 = await blobToBase64(pcmBlob);
+                
+                resolve({ url: audioUrl, base64, mimeType: 'audio/pcm' });
             }
-
-            const pcmBlob = new Blob([samples.buffer], { type: 'audio/pcm' });
-            const audioUrl = URL.createObjectURL(pcmBlob);
-            const base64 = await blobToBase64(pcmBlob);
-            
-            resolve({ url: audioUrl, base64, mimeType: 'audio/pcm' });
         } catch (error) {
-            console.error("Error during PCM processing:", error);
-            // Resolve with null or an error state if encoding fails
+            console.error("Error during audio processing:", error);
             resolve(null);
         } finally {
             setIsRecording(false);

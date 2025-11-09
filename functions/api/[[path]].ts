@@ -3,6 +3,10 @@
  * proxy to iFlytek (Xunfei) services. It routes requests to either:
  * 1. Speech Evaluation (suntone) via WebSocket for pronunciation scoring.
  * 2. Text-to-Speech (TTS) via HTTP POST for generating demonstration audio.
+ *
+ * NOTE: The primary cause of 'Timeout' errors is often a misconfigured IP whitelist
+ * in the Xunfei developer console. This function's code is correct, but Xunfei's
+ * firewall may silently drop requests from unknown IPs, leading to a timeout here.
  */
 
 import { EvaluationRequestBody, TtsRequestBody } from '../../types';
@@ -13,7 +17,7 @@ type PagesFunction = (context: {
   env: Record<string, any>;
 }) => Promise<Response>;
 
-// --- Hashing and Encoding Helpers ---
+// --- Hashing and Encoding Utilities ---
 const toBase64 = (buffer: ArrayBuffer): string => {
     let binary = '';
     const bytes = new Uint8Array(buffer);
@@ -34,6 +38,9 @@ async function sha256_base64(buffer: ArrayBuffer): Promise<string> {
 
 // --- Xunfei Authentication Logic ---
 
+/**
+ * Generates the required authentication headers for Xunfei HTTP/WebSocket APIs.
+ */
 async function getXunfeiAuthParams(
   env: Record<string, any>, 
   host: string, 
@@ -70,34 +77,32 @@ async function getXunfeiAuthParams(
 // --- WebSocket Handler for Speech Evaluation ---
 async function handleEvaluation(request: Request, env: Record<string, any>): Promise<Response> {
   const { audioBase64, referenceText, audioMimeType } = await request.json() as EvaluationRequestBody;
+  
+  // Determine the audio encoding format for the API request.
   const encoding = audioMimeType === 'audio/pcm' ? 'raw' : 'lame';
   
+  // Dynamically construct the authenticated WebSocket URL.
   const host = 'cn-east-1.ws-api.xf-yun.com';
   const path = '/v1/private/s8e098720';
   const { date, authorization } = await getXunfeiAuthParams(env, host, path, 'GET');
-
   const params = new URLSearchParams({ host, date, authorization });
   const authUrl = `wss://${host}${path}?${params.toString()}`;
 
+  // This Promise wraps the entire WebSocket lifecycle.
   const result = await new Promise((resolve, reject) => {
       const ws = new WebSocket(authUrl);
-      let timeoutId: any;
-
-      const cleanup = () => {
-          if (timeoutId) clearTimeout(timeoutId);
-      };
-
-      timeoutId = setTimeout(() => {
-          cleanup();
-          if (ws.readyState < 2) { // CONNECTING or OPEN
+      const timeoutId = setTimeout(() => {
+          if (ws.readyState < WebSocket.CLOSING) {
               ws.close(1001, 'Timeout');
           }
-          // The rejection is now handled by the 'close' event listener for consistency.
+          // The 'close' event handler will then reject the promise.
       }, 15000); // 15-second timeout
 
-      ws.addEventListener('open', () => {
+      const cleanup = () => clearTimeout(timeoutId);
+
+      ws.onopen = () => {
           const requestFrame = {
-              header: { app_id: env.XUNFEI_APP_ID, status: 0 }, // status 0 for start frame
+              header: { app_id: env.XUNFEI_APP_ID, status: 0 },
               parameter: {
                   st: {
                       lang: 'en', core: 'word', refText: referenceText, phoneme_output: 1,
@@ -106,20 +111,16 @@ async function handleEvaluation(request: Request, env: Record<string, any>): Pro
               },
               payload: {
                   data: {
-                      encoding: encoding,
-                      sample_rate: 16000, channels: 1, bit_depth: 16,
-                      status: 0, // status 0 for start frame
-                      audio: audioBase64,
+                      encoding, sample_rate: 16000, channels: 1, bit_depth: 16, status: 0, audio: audioBase64,
                   }
               }
           };
-          // The API expects data in chunks, but for short audio, we can send start and end frames back-to-back.
           ws.send(JSON.stringify(requestFrame));
-          // Send end frame
+          // Send the final frame immediately after the first one.
           ws.send(JSON.stringify({ header: { app_id: env.XUNFEI_APP_ID, status: 2 } }));
-      });
+      };
 
-      ws.addEventListener('message', (event) => {
+      ws.onmessage = (event) => {
           const response = JSON.parse(event.data as string);
           if (response.header.code === 0 && response.payload?.result?.text) {
               cleanup();
@@ -128,23 +129,24 @@ async function handleEvaluation(request: Request, env: Record<string, any>): Pro
               ws.close(1000, "Task completed");
           } else if (response.header.code !== 0) {
               cleanup();
-              reject(new Error(`AI 引擎错误: ${response.header.message || '未知错误'}`));
+              reject({ message: `AI 引擎错误: ${response.header.message || '未知错误'}`, code: 'XF_API_ERROR' });
               ws.close(4000, "Error received");
           }
-      });
+      };
 
-      ws.addEventListener('error', () => {
+      ws.onerror = () => {
           cleanup();
-          reject(new Error('与 AI 评分服务连接失败。'));
-      });
-      ws.addEventListener('close', (event) => {
+          reject({ message: '与 AI 评分服务连接失败。', code: 'XF_CONNECTION_FAILED' });
+      };
+      
+      ws.onclose = (event) => {
           cleanup();
           if (event.code === 1001 && event.reason === 'Timeout') {
-              reject(new Error('AI 引擎响应超时。'));
+              reject({ message: 'AI 引擎响应超时。', code: 'XF_TIMEOUT' });
           } else if (!event.wasClean) {
-              reject(new Error(`与 AI 评分服务的连接意外断开 (Code: ${event.code})。`));
+              reject({ message: `与 AI 评分服务的连接意外断开 (Code: ${event.code})。`, code: 'XF_CONNECTION_CLOSED' });
           }
-      });
+      };
   });
 
   return new Response(JSON.stringify(result), {
@@ -160,42 +162,32 @@ async function handleTts(request: Request, env: Record<string, any>): Promise<Re
     const host = 'tts-api.xfyun.cn';
     const path = '/v2/tts';
     
-    const ttsRequestBody = {
+    const ttsRequestBody = JSON.stringify({
         header: { app_id: env.XUNFEI_APP_ID },
         parameter: {
             tts: { ent: 'en_vip', vcn: 'abby', aue: 'lame', tte: 'UTF8' }
         },
         payload: {
             text: {
-                encoding: 'UTF8',
-                status: 2,
-                text: toBase64(utf8StringToBuf(text))
+                encoding: 'UTF8', status: 2, text: toBase64(utf8StringToBuf(text))
             }
         }
-    };
-    const bodyString = JSON.stringify(ttsRequestBody);
-
-    const { date, authorization, digestHeader } = await getXunfeiAuthParams(env, host, path, 'POST', bodyString);
-
-    const ttsUrl = `https://${host}${path}`;
-
-    const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'Host': host,
-        'Date': date,
-        'Authorization': authorization
-    };
-    if (digestHeader) {
-        headers['Digest'] = digestHeader;
-    }
-
-    const response = await fetch(ttsUrl, {
-        method: 'POST',
-        headers: headers,
-        body: bodyString
     });
 
-    const responseData = await response.json();
+    const { date, authorization, digestHeader } = await getXunfeiAuthParams(env, host, path, 'POST', ttsRequestBody);
+    
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json', 'Host': host, 'Date': date, 'Authorization': authorization
+    };
+    if (digestHeader) headers['Digest'] = digestHeader;
+
+    const response = await fetch(`https://${host}${path}`, {
+        method: 'POST',
+        headers,
+        body: ttsRequestBody
+    });
+
+    const responseData = await response.json() as any;
     
     if (responseData.header?.code !== 0) {
         throw new Error(`音频合成失败 (${responseData.header?.code || 'N/A'}): ${responseData.header?.message || '未知错误'}`);
@@ -209,15 +201,14 @@ async function handleTts(request: Request, env: Record<string, any>): Promise<Re
 
 
 /**
- * Main request handler that routes to the appropriate function.
+ * Main Cloudflare Pages function that routes requests to the appropriate handler.
  */
 export const onRequestPost: PagesFunction = async ({ request, env }) => {
   const url = new URL(request.url);
-
   try {
     const { XUNFEI_APP_ID, XUNFEI_API_KEY, XUNFEI_API_SECRET } = env;
     if (!XUNFEI_APP_ID || !XUNFEI_API_KEY || !XUNFEI_API_SECRET) {
-      console.error('Xunfei environment variables not set.');
+      console.error('Xunfei environment variables are not set.');
       throw new Error('Server configuration error.');
     }
 
@@ -234,7 +225,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
   } catch (error: any) {
     console.error(`Error in proxy for ${url.pathname}:`, error);
     const errorMessage = error.message || 'An unknown error occurred.';
-    return new Response(JSON.stringify({ error: `服务错误: ${errorMessage}` }), {
+    const errorCode = error.code || 'UNKNOWN';
+    return new Response(JSON.stringify({ error: `服务错误: ${errorMessage}`, code: errorCode }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });

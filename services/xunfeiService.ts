@@ -28,6 +28,10 @@ export const getPronunciationScore = async (
         const result = await response.json();
 
         if (!response.ok) {
+            // Check for specific error code from our proxy to provide better feedback.
+            if (result.code === 'XF_TIMEOUT') {
+                throw new Error('AI 引擎响应超时。\n这通常意味着讯飞的“语音评测”服务尚未在您的应用ID下正确开通，或服务已到期。请登录讯飞开放平台检查。');
+            }
             throw new Error(result.error || `AI评分服务网络错误: ${response.statusText}`);
         }
         
