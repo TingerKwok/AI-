@@ -9,7 +9,6 @@ import { PracticeCard } from './PracticeCard';
 import { LoadingIcon } from './Icons';
 
 const phonemeData = PRACTICE_DATA[PracticeLevel.Phonemes] as PhonemeSuperCategory[];
-const allPhonemeCategories = phonemeData.flatMap(sup => sup.categories.map(cat => cat.title));
 
 export const PronunciationCoach: React.FC = () => {
   // 视图现在直接从音标关卡选择开始
@@ -24,9 +23,6 @@ export const PronunciationCoach: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   
   const { isRecording, startRecording, stopRecording } = useAudioRecorder();
-
-  const unlockedPhonemeCategories = allPhonemeCategories;
-
 
   useEffect(() => {
     // 效果现在只依赖于选择的分类
@@ -108,9 +104,7 @@ export const PronunciationCoach: React.FC = () => {
     if (view === 'phoneme_level') {
         return <PhonemePath 
             phonemeData={phonemeData}
-            unlockedCategories={unlockedPhonemeCategories}
             onSelectCategory={handleCategorySelect}
-            // onBack 已被移除，因为此界面没有地方可以返回
         />
     }
 
@@ -141,8 +135,7 @@ export const PronunciationCoach: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
         <header className="p-4 flex justify-center items-center bg-white dark:bg-gray-800/50 backdrop-blur-sm shadow-sm sticky top-0 z-10">
-            <h1 className="text-xl font-bold text-orange-600 dark:text-orange-400">AI 发音教练</h1>
-            {/* 登录/注销按钮和用户信息已移除 */}
+            <h1 className="text-xl font-bold text-orange-600 dark:text-orange-400">音标发音练习</h1>
         </header>
         <main className="p-4">
             {renderContent()}

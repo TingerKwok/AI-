@@ -19,7 +19,7 @@ export interface ScoreResult {
   feedback: string;
 }
 
-// Fix: Define the User interface, which was removed from App.tsx but is still required by other components.
+// FIX: Added back the User interface, which is still used by authService and LoginPage.
 export interface User {
   identifier: string;
 }
