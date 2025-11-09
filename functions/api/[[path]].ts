@@ -1,11 +1,10 @@
 /**
  * @file This file implements a Cloudflare Pages function that acts as a secure
- * proxy to the SiliconFlow API for a two-stage pronunciation evaluation.
+ * proxy to the iFlytek (Xunfei) speech evaluation API.
  *
- * It handles POST requests to `/api/evaluation`.
- * Stage 1: Transcribes user audio to text using an ASR model.
- * Stage 2: Sends the transcribed text and reference text to a powerful LLM
- *          to get an intelligent score and feedback.
+ * It handles POST requests to `/api/evaluation`, establishes a WebSocket
+ * connection to the Xunfei service, performs HMAC-SHA256 authentication,
+ * sends the audio data for evaluation, and returns the detailed result.
  */
 
 // Define the expected request body structure from the frontend.
@@ -15,151 +14,148 @@ interface EvaluationRequestBody {
   referenceText: string;
 }
 
-// Define the final JSON structure we want to send to the frontend.
-interface ScoreResult {
-  score: number;
-  feedback: string;
-}
-
-// Helper function to convert Base64 to Blob
-const base64ToBlob = (base64: string, mimeType: string): Blob => {
-    const byteCharacters = atob(base64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: mimeType });
-}
-
-// FIX: Define the PagesFunction type to resolve the "Cannot find name 'PagesFunction'" error.
-// This provides a minimal type definition for a Cloudflare Pages function handler.
+// Minimal type definition for a Cloudflare Pages function handler.
 type PagesFunction = (context: {
   request: Request;
-  env: unknown;
+  env: Record<string, any>;
 }) => Promise<Response>;
+
+// --- Hashing and Encoding Helpers ---
+const toBase64 = (buffer: ArrayBuffer): string => {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+};
+
+const utf8StringToBuf = (str: string): ArrayBuffer => {
+    return new TextEncoder().encode(str).buffer;
+};
+
+// --- Xunfei Authentication Logic ---
+async function getXunfeiAuthUrl(env: Record<string, any>): Promise<string> {
+  const host = 'cn-east-1.ws-api.xf-yun.com';
+  const requestLine = 'GET /v1/private/s8e098720 HTTP/1.1';
+  const date = new Date().toUTCString();
+
+  const signatureOrigin = `host: ${host}\ndate: ${date}\n${requestLine}`;
+
+  const secretKey = env.XUNFEI_API_SECRET;
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    utf8StringToBuf(secretKey),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signatureBuffer = await crypto.subtle.sign('HMAC', cryptoKey, utf8StringToBuf(signatureOrigin));
+  const signature = toBase64(signatureBuffer);
+
+  const authorizationOrigin = `api_key="${env.XUNFEI_API_KEY}", algorithm="hmac-sha256", headers="host date request-line", signature="${signature}"`;
+  const authorization = btoa(authorizationOrigin);
+
+  const params = new URLSearchParams({
+    host: host,
+    date: date,
+    authorization: authorization,
+  });
+
+  return `wss://${host}/v1/private/s8e098720?${params.toString()}`;
+}
 
 /**
  * Handles POST requests to the /api/evaluation endpoint.
  */
 export const onRequestPost: PagesFunction = async ({ request, env }) => {
   const url = new URL(request.url);
-
-  // This function only handles the /api/evaluation path.
   if (url.pathname !== '/api/evaluation') {
     return new Response('Not Found', { status: 404 });
   }
 
   try {
-    // FIX: Changed to use a type assertion `as` because the standard `request.json()` method does not accept generic type arguments.
-    const { audioBase64, audioMimeType, referenceText } = (await request.json()) as EvaluationRequestBody;
+    const { audioBase64, referenceText } = await request.json() as EvaluationRequestBody;
+    const { XUNFEI_APP_ID, XUNFEI_API_KEY, XUNFEI_API_SECRET } = env;
 
-    if (!audioBase64 || !audioMimeType || !referenceText) {
-      return new Response(JSON.stringify({ error: 'Missing required fields.' }), {
-        status: 400, headers: { 'Content-Type': 'application/json' },
-      });
+    if (!XUNFEI_APP_ID || !XUNFEI_API_KEY || !XUNFEI_API_SECRET) {
+      console.error('Xunfei environment variables not set.');
+      return new Response(JSON.stringify({ error: 'Server configuration error.' }), { status: 500, headers: { 'Content-Type': 'application/json' }});
     }
 
-    const apiKey = (env as any).SILICONFLOW_API_KEY;
-    if (!apiKey) {
-      console.error('SILICONFLOW_API_KEY environment variable not set.');
-      return new Response(JSON.stringify({ error: 'Server configuration error.' }), {
-        status: 500, headers: { 'Content-Type': 'application/json' },
-      });
-    }
+    const authUrl = await getXunfeiAuthUrl(env);
 
-    // --- STAGE 1: Audio Transcription ---
-    const audioBlob = base64ToBlob(audioBase64, audioMimeType);
-    const formData = new FormData();
-    formData.append('file', audioBlob, 'recording.webm');
-    formData.append('model', 'FunAudioLLM/SenseVoiceSmall');
-    
-    const transcriptionResponse = await fetch('https://api.siliconflow.cn/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-        body: formData,
+    const result = await new Promise((resolve, reject) => {
+      const ws = new WebSocket(authUrl);
+
+      ws.addEventListener('open', () => {
+        // Construct and send the business request frame
+        const requestFrame = {
+          header: { app_id: XUNFEI_APP_ID, status: 2 }, // status 2 for a complete, non-streaming request
+          parameter: {
+            st: {
+              lang: 'en',
+              core: 'word', // Evaluate as a single word
+              refText: referenceText,
+              phoneme_output: 1, // Crucial: get phoneme-level scores
+              result: {
+                encoding: 'utf8',
+                compress: 'raw',
+                format: 'json',
+              },
+            },
+          },
+          payload: {
+            data: {
+              encoding: 'lame', // Assuming input is mp3-compatible
+              sample_rate: 16000,
+              channels: 1,
+              bit_depth: 16,
+              status: 2, // status 2 for final audio frame
+              audio: audioBase64,
+            },
+          },
+        };
+        ws.send(JSON.stringify(requestFrame));
+      });
+
+      ws.addEventListener('message', (event) => {
+        const response = JSON.parse(event.data as string);
+        if (response.header.code === 0) {
+          // Success
+          const resultText = response.payload.result.text;
+          const decodedResult = atob(resultText);
+          const finalJson = JSON.parse(decodedResult);
+          resolve(finalJson.result); // Resolve with the actual result object
+        } else {
+          // Error from Xunfei API
+          console.error('Xunfei API Error:', response.header.message);
+          reject(new Error(`AI 引擎错误: ${response.header.message}`));
+        }
+        ws.close();
+      });
+
+      ws.addEventListener('error', (event) => {
+        console.error('WebSocket Error:', event);
+        reject(new Error('与 AI 评分服务连接失败。'));
+      });
+      
+      ws.addEventListener('close', (event) => {
+        if (!event.wasClean) {
+            reject(new Error('与 AI 评分服务的连接意外断开。'));
+        }
+      });
+
     });
 
-    if (!transcriptionResponse.ok) {
-        const errorBody = await transcriptionResponse.text();
-        console.error(`SiliconFlow Transcription API error: ${transcriptionResponse.status}`, errorBody);
-        throw new Error(`语音转文本服务失败: ${transcriptionResponse.statusText}`);
-    }
-
-    const transcriptionResult = await transcriptionResponse.json();
-    const transcribedText = (transcriptionResult as any).text.trim();
-
-    // --- STAGE 2: Intelligent Scoring with LLM ---
-    const prompt = `
-# Role
-You are a professional English pronunciation coach.
-
-# Task
-Strictly compare the "Standard Pronunciation" with the "User's Transcribed Pronunciation". Then, provide a score from 0 to 100 and a short, constructive feedback in Chinese.
-
-# Scoring Criteria
-- If the two texts are identical, the score should be above 90.
-- If there are minor differences (e.g., 'see' vs 'shee'), the score should be between 70-85, and you must point out the specific issue.
-- If the difference is significant, the score should be below 60.
-
-# Input Data
-- Standard Pronunciation text: "${referenceText}"
-- User's Transcribed Pronunciation: "${transcribedText}"
-
-# Output Format
-You MUST respond ONLY with a valid JSON object in the following format, with no extra text, explanations, or code block markers:
-{
-  "score": number,
-  "feedback": "string"
-}
-`;
-
-    const chatRequestBody = {
-        model: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
-        messages: [
-            { role: "user", content: prompt }
-        ],
-        temperature: 0.3,
-        max_tokens: 150,
-        response_format: { type: "json_object" } // Ask for JSON output explicitly
-    };
-
-    const chatResponse = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(chatRequestBody)
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
     });
-
-    if (!chatResponse.ok) {
-        const errorBody = await chatResponse.text();
-        console.error(`SiliconFlow Chat API error: ${chatResponse.status}`, errorBody);
-        throw new Error(`智能评分服务失败: ${chatResponse.statusText}`);
-    }
-
-    const chatResult = await chatResponse.json();
-    const content = (chatResult as any).choices[0]?.message?.content;
-    
-    if (!content) {
-        throw new Error("智能评分模型未返回有效内容。");
-    }
-
-    // Parse the JSON string from the LLM's response.
-    try {
-        const finalResult: ScoreResult = JSON.parse(content);
-        return new Response(JSON.stringify(finalResult), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-        });
-    } catch (parseError) {
-        console.error("Failed to parse JSON from LLM response:", content, parseError);
-        throw new Error("智能评分模型返回了无效的格式。");
-    }
 
   } catch (error: any) {
-    console.error('Error during pronunciation evaluation:', error);
+    console.error('Error during Xunfei evaluation proxy:', error);
     const errorMessage = error.message || 'An unknown error occurred.';
     return new Response(JSON.stringify({ error: `服务错误: ${errorMessage}` }), {
       status: 500,

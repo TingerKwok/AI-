@@ -1,14 +1,14 @@
-import { PracticeItem, PracticeLevel, ScoreResult } from '../types';
+import { PracticeItem, PracticeLevel, EvaluationResult } from '../types';
 
 /**
- * Gets a pronunciation score from our backend proxy, which now uses SiliconFlow.
+ * Gets a pronunciation score from our backend proxy, which now uses the Xunfei evaluation engine.
  */
 export const getPronunciationScore = async (
   audioBase64: string,
   audioMimeType: string,
   item: PracticeItem,
   level: PracticeLevel
-): Promise<ScoreResult> => {
+): Promise<EvaluationResult> => {
     // The URL points to our secure serverless proxy.
     const url = `/api/evaluation`;
 
@@ -35,8 +35,8 @@ export const getPronunciationScore = async (
             throw new Error(result.error || `AI评分服务网络错误: ${response.statusText}`);
         }
         
-        // The proxy now returns data in the exact format the frontend needs.
-        return result as ScoreResult;
+        // The proxy now returns the detailed evaluation result from Xunfei.
+        return result as EvaluationResult;
 
     } catch (error) {
         console.error("Error getting pronunciation score (via proxy):", error);

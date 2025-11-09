@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PracticeItem, PracticeLevel, ScoreResult } from '../types';
+import { PracticeItem, PracticeLevel, EvaluationResult } from '../types';
 import { SpeakerIcon, MicIcon, StopIcon, LoadingIcon } from './Icons';
 import { ScoreDisplay } from './ScoreDisplay';
 // The baiduAiService is no longer needed here as TTS fallback is removed.
@@ -10,7 +10,7 @@ interface PracticeCardProps {
   isRecording: boolean;
   isLoading: boolean;
   loadingMessage: string;
-  score: ScoreResult | null;
+  score: EvaluationResult | null;
   error: string | null;
   allItems: PracticeItem[];
   currentIndex: number;
@@ -192,7 +192,7 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
             </div>
         )}
 
-        {score && !isLoading && !error && <ScoreDisplay score={score.score} feedback={score.feedback} />}
+        {score && !isLoading && !error && <ScoreDisplay result={score} />}
       </div>
     </div>
   );

@@ -14,10 +14,45 @@ export interface PracticeItem {
   speakableText?: string; // Pre-computed text for TTS to pronounce phonemes
 }
 
-export interface ScoreResult {
-  score: number;
-  feedback: string;
+// --- NEW Xunfei Evaluation Result Types ---
+
+export interface PhonemeScore {
+  span: { end: number; start: number };
+  tone_index: string;
+  phone: string;
+  pronunciation: number;
+  phoneme: string;
 }
+
+export interface WordScore {
+  span: { end: number; start: number };
+  charType: number;
+  word: string;
+  phonemes: PhonemeScore[];
+  pinyin: string;
+  tone: string;
+  readType: number; // 0: normal, 1: insert before, 2: miss, 3: repeat, 4: misread
+  pause: { duration: number; type: number };
+  scores: {
+    tone: number;
+    pronunciation: number;
+    prominence: number;
+    overall: number;
+  };
+}
+
+// This is the new main result type returned by our backend service.
+export interface EvaluationResult {
+  overall: number;
+  integrity: number;
+  fluency: number;
+  pronunciation: number;
+  words: WordScore[];
+  speed: number;
+}
+
+// The old ScoreResult is deprecated and replaced by EvaluationResult
+export type ScoreResult = EvaluationResult;
 
 // FIX: Added back the User interface, which is still used by authService and LoginPage.
 export interface User {

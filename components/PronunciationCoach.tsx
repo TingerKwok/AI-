@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PracticeLevel, PracticeItem, ScoreResult, PhonemeSuperCategory } from '../types';
+import { PracticeLevel, PracticeItem, EvaluationResult, PhonemeSuperCategory } from '../types';
 import { PRACTICE_DATA } from '../constants';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import * as baiduAiService from '../services/baiduAiService';
@@ -19,7 +19,7 @@ export const PronunciationCoach: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [score, setScore] = useState<ScoreResult | null>(null);
+  const [score, setScore] = useState<EvaluationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   
   const { isRecording, startRecording, stopRecording } = useAudioRecorder();
@@ -78,7 +78,7 @@ export const PronunciationCoach: React.FC = () => {
     const audioData = await stopRecording();
     if (audioData) {
       setIsLoading(true);
-      setLoadingMessage('AI 正在为您评分...');
+      setLoadingMessage('专业 AI 引擎正在分析您的发音...');
       try {
         const currentItem = practiceItems[currentItemIndex];
         const result = await baiduAiService.getPronunciationScore(
@@ -88,7 +88,8 @@ export const PronunciationCoach: React.FC = () => {
           PracticeLevel.Phonemes // 硬编码为音标练习
         );
         setScore(result);
-      } catch (err: any) {
+      } catch (err: any)
+      {
         setError(err.message || '评分时发生错误。');
       } finally {
         setIsLoading(false);
