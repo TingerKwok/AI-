@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PracticeItem, PracticeLevel, EvaluationResult } from '../types';
 import { SpeakerIcon, MicIcon, StopIcon, LoadingIcon } from './Icons';
 import { ScoreDisplay } from './ScoreDisplay';
+import { getTtsAudio } from '../services/xunfeiService';
 
 interface PracticeCardProps {
   item: PracticeItem;
@@ -37,69 +38,73 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
   onBack,
 }) => {
   const [isPlayingRef, setIsPlayingRef] = useState(false);
+  const [isFetchingRefAudio, setIsFetchingRefAudio] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const refAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // When the practice item changes, stop any currently playing audio and clear errors.
+  // When the practice item changes, stop any currently playing audio.
   useEffect(() => {
     setPlaybackError(null);
     if (refAudioRef.current) {
       refAudioRef.current.pause();
-      setIsPlayingRef(false);
+      refAudioRef.current = null;
     }
-    // This effect ensures audio from a previous item doesn't continue playing.
-    return () => {
-      if (refAudioRef.current) {
-        refAudioRef.current.pause();
-        refAudioRef.current = null;
-      }
-    };
+    setIsPlayingRef(false);
   }, [item]);
 
-  const handlePlayReferenceAudio = () => {
-    setPlaybackError(null); // Clear previous errors before playing
-    // If audio is currently playing, pause it and reset.
+  const handlePlayReferenceAudio = async () => {
+    setPlaybackError(null);
+
+    // If audio is currently playing, pause it.
     if (isPlayingRef && refAudioRef.current) {
       refAudioRef.current.pause();
-      refAudioRef.current.currentTime = 0;
-      setIsPlayingRef(false);
       return;
     }
 
-    // Ensure there's a local audio file URL to play.
-    if (!item.refAudioUrl) {
-      setPlaybackError('此项目没有提供示范音频文件。');
-      return;
-    }
-
-    // Use the existing audio element if it's for the same URL, otherwise create a new one.
-    if (refAudioRef.current && refAudioRef.current.src.endsWith(item.refAudioUrl)) {
+    // If we have an audio element paused, resume it.
+    if (!isPlayingRef && refAudioRef.current) {
       refAudioRef.current.play().catch(e => {
-        console.error("Audio playback failed programmatically.", e);
+        console.error("Audio resume failed.", e);
         setPlaybackError('音频播放失败。');
-        setIsPlayingRef(false);
       });
-    } else {
-      const audio = new Audio(item.refAudioUrl);
+      return;
+    }
+
+    // If no audio element, fetch and create a new one.
+    setIsFetchingRefAudio(true);
+    try {
+      const textToSpeak = item.speakableText || item.exampleWord || item.text;
+      if (!textToSpeak) {
+        throw new Error('此项目没有可供朗读的文本。');
+      }
+
+      const audioBase64 = await getTtsAudio(textToSpeak);
+      const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`);
       refAudioRef.current = audio;
 
       audio.onplaying = () => setIsPlayingRef(true);
       audio.onpause = () => setIsPlayingRef(false);
       audio.onended = () => {
         setIsPlayingRef(false);
-        audio.currentTime = 0; // Reset for next play
+        if (refAudioRef.current) {
+          refAudioRef.current.currentTime = 0;
+        }
       };
-      audio.onerror = (e) => {
-        console.error(`Error playing audio file: ${item.refAudioUrl}. The browser could not load the resource. This is often due to the file not being found (404 Not Found). Please ensure the file exists in your project's 'public' directory.`, e);
-        setPlaybackError('无法播放示范音频，请检查文件是否存在。');
+      audio.onerror = () => {
+        setPlaybackError('无法播放示范音频。');
         setIsPlayingRef(false);
       };
 
-      audio.play().catch(e => {
-        console.error("Audio playback failed programmatically. This could be due to browser restrictions.", e);
+      audio.play().catch(() => {
         setPlaybackError('音频播放失败。');
         setIsPlayingRef(false);
       });
+
+    } catch (error: any) {
+      console.error("Failed to fetch/play TTS audio:", error);
+      setPlaybackError(error.message || '获取示范音频失败。');
+    } finally {
+      setIsFetchingRefAudio(false);
     }
   };
 
@@ -155,11 +160,11 @@ export const PracticeCard: React.FC<PracticeCardProps> = ({
         <div className="mt-8 flex justify-center items-center gap-12">
             <button
                 onClick={handlePlayReferenceAudio}
-                disabled={isRecording}
+                disabled={isRecording || isFetchingRefAudio}
                 className="flex items-center gap-2 text-lg font-semibold text-gray-600 dark:text-gray-300 hover:text-orange-500 dark:hover:text-orange-400 transition-colors disabled:opacity-50"
             >
-                <SpeakerIcon className="w-6 h-6"/>
-                <span>{isPlayingRef ? '暂停' : '听示范'}</span>
+                {isFetchingRefAudio ? <LoadingIcon className="w-6 h-6" /> : <SpeakerIcon className="w-6 h-6"/>}
+                <span>{isPlayingRef ? '暂停' : isFetchingRefAudio ? '加载中...' : '听示范'}</span>
             </button>
             <button
                 onClick={isRecording ? onStopRecording : onStartRecording}

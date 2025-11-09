@@ -205,6 +205,21 @@ async function handleTts(request: Request, env: Record<string, any>): Promise<Re
  * It explicitly checks for the POST method to ensure stability.
  */
 export const onRequest: PagesFunction = async ({ request, env }) => {
+  // Browsers send an OPTIONS request (preflight) for complex requests,
+  // such as one with a 'Content-Type: application/json' header.
+  // We need to handle this to allow the actual POST request to proceed.
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204, // No Content
+      headers: {
+        'Access-Control-Allow-Origin': '*', // In production, you might want to restrict this to your domain
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age': '86400', // Cache preflight response for 1 day
+      },
+    });
+  }
+  
   // Explicitly handle only POST requests for our API endpoints.
   if (request.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405, headers: { 'Allow': 'POST' } });
